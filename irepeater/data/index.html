@@ -1,0 +1,233 @@
+<!doctype html>
+<html>
+  <head>
+  <meta charset="UTF-8">
+  <style>
+  .pin{
+/*  width: 100px;*/
+/*  height: 100px;*/
+    float: left;
+    margin: 10px;
+    background-color: red;
+    border-radius: 50px;
+    padding: 20px;
+  }
+  #txtArea {
+    width: 80%;
+    min-height: 120px;
+  }
+  </style>
+  </head>
+  <body>
+    <div id="pins">
+      <div id="1" class="pin" onclick="gpiotoggle(this);">D1</div>
+      <div id="3" class="pin" onclick="gpiotoggle(this);">D3</div>
+      <div id="5" class="pin" onclick="gpiotoggle(this);">D5</div>
+      <div id="4" class="pin" onclick="gpiotoggle(this);">D4</div>
+      <div id="0" class="pin" onclick="gpiotoggle(this);">D0</div>
+      <div id="2" class="pin" onclick="gpiotoggle(this);">D2</div>
+      <div id="16" class="pin" onclick="gpiotoggle(this);">D16</div>
+      <div id="14" class="pin" onclick="gpiotoggle(this);">D14</div>
+      <div id="12" class="pin" onclick="gpiotoggle(this);">D12</div>
+      <div id="13" class="pin" onclick="gpiotoggle(this);">D13</div>
+      <div id="15" class="pin" onclick="gpiotoggle(this);">D15</div>
+    </div>
+    <div><textarea id="txtArea">Messages:</textArea></div>
+    <button id="btnClear" type="button" onclick="delete(window.localStorage.irper_codes_json);" >Clear IR codes!</button>
+    <div id="IR"></div>
+
+
+    <script>
+
+// append all arguments to txtArea
+function dbg(){
+    msg = "";
+    txt = document.getElementById("txtArea")
+    for (var i = 0; i < arguments.length; i++) {
+        msg+=arguments[i];
+    }
+    txt.value += msg + "\n";
+    txt.scrollTop = txt.scrollHeight; //like tail -f
+}
+
+//from IRremoteESP8266.h
+var decode_type_t = {  
+  1:  "NEC",
+  2:  "SONY",
+  3:  "RC5",
+  4:  "RC6",
+  5:  "DISH",
+  6:  "SHARP",
+  7:  "PANASONIC",
+  8:  "JVC",
+  9:  "SANYO",
+  10: "MITSUBISHI",
+  11: "SAMSUNG",
+  12: "LG",
+  13: "WHYNTER",
+  14: "AIWA_RC_T501",
+  "-1": "RAW" //aka UNKNOWN
+};
+
+
+/* e.g.
+*   esp("gpio", { "D12",1 } ) -> <host:port>/gpio?D12=1 
+* Also works with Array (key becomes array index)s
+*/
+function esp(process, KV_pair){
+    xmlhttp=new XMLHttpRequest();
+        
+    // use this for reverse i-frame: 
+    var url = (window.location != window.parent.location) ? document.referrer: document.location.href;
+    //console.log(url)
+    url=url.concat(process, "?");
+    for (var i in KV_pair){
+        url=url.concat(i,"=", KV_pair[i], "&");
+    }
+    console.log("Url is ", url);
+    xmlhttp.open("GET", url, true); //async=true
+    xmlhttp.send();
+    if (xmlhttp.responseText != null){
+        dbg(process, " response: ", xmlhttp.responseText);
+    }
+}
+
+function gpiotoggle(e){
+    //parse
+    id = e.getAttribute("id");
+    o = {};
+
+    //toggle
+    if ( e.style.backgroundColor == "green" ) { //turn off
+        e.style.backgroundColor = "red";
+        o[id] = 0;
+        esp("gpio", o );
+    }
+    else { //turn on
+        e.style.backgroundColor = "green";
+        o[id] = 1;
+        esp("gpio", o);
+    }
+}
+
+/** store  tag, irvalue pair on irper_codes in localStorage */ 
+function store(tag, irvalue){
+    dbg( "Storing locally: ", tag);
+    //check if browser support local storage
+    if(typeof(Storage) == "undefined") {
+        alert("Your browser doesn't support local storage and this won't work!");
+        return;
+    }
+    
+    irper_codes[tag] = irvalue;
+    //save.. every time
+    localStorage.irper_codes_json = JSON.stringify(irper_codes);
+}
+
+function startWebSocket()
+{
+    if ("WebSocket" in window)
+    {
+        dbg("WS: Active");
+        
+        // open a web socket -- URL at the end can be used as anything by convention
+        var ws =  new WebSocket("ws://" + location.host + ":81/otinanai_url");
+        ws.binaryType = 'arraybuffer'; //not "blob"
+
+        ws.onopen = function()
+        {
+            // Web Socket is connected, send data using send()
+            ws.send("Greetings from browser!");
+        };
+                   
+        /* If message is TXT then if it's a debug message.
+            If it is binary then it is an uint32 [type,code, length, raw_data_with_legth_size ]
+        */
+        ws.onmessage = function (e) 
+        { 
+            var received_msg = e.data;
+            if ( typeof e.data === "string" ) {
+                dbg(e.data);
+                return;
+            }
+            //assume all messages are binary (how to check?)
+            var u32 = new Uint32Array(received_msg);
+            var tmp = new Array();
+            var type = u32[0];
+            var code = u32[1];
+            var bits = u32[2];
+            var length = u32[3];
+            var tag = decode_type_t[type] + ":0x" + code.toString(16);
+
+            dbg("WS: server sent message with\n tag, bits, length: ", tag,", ", bits, ", ", length);
+
+            for ( var i = 4 ; i < (length+4) ; i++){
+                tmp.push(u32[i] * 50); //USECPERTICK = 50
+            }
+            dbg(tmp.join(", "));
+            store( tag, { "type":type, "code": code, "bits": bits, "raw": tmp } );
+        };
+                        
+        ws.onclose = function()
+        { 
+            // websocket is closed.
+            dbg("WS: server closed connection"); 
+        };
+    }
+    
+    else
+    {
+        // The browser doesn't support WebSocket
+        alert("WebSocket NOT supported by your Browser!");
+    }
+}
+
+/* parse irper_codes to flat array 0=type, 1=code, 2=bits, 3=IR1, 4=IR2 ... (length is implicit)
+   If type != -1 (RAW) just send the triple type,code,bits and don't bother with the rest
+*/
+function sendIR(e){
+    var tag = e.innerText;
+    var payload = [ irper_codes[tag]["type"], irper_codes[tag]["code"],irper_codes[tag]["bits"] ];
+    dbg("sending ", tag, " ...");
+    if ( payload[0] == -1 ){
+        dbg("AS RAW!");
+        payload.concat(irper_codes[tag]["raw"]);
+    }
+    /* obj = {}
+    for (i in times){
+        obj[i] = times[i];
+    }*/
+    esp("irsend", payload);
+}
+
+/** loads IR GUI from global "irper_codes" */
+function start_IR_GUI()
+{
+    e= document.getElementById('IR');
+    html = "";
+    for (code in irper_codes){
+        html= html.concat('<div class="pin" onclick="sendIR(this);">',code,"</div>");
+    }
+    e.innerHTML = html;
+}
+
+/********* Main ************/
+document.addEventListener("DOMContentLoaded", function() {
+    // Init global "irper_codes" from localstorage
+    if (! localStorage.irper_codes_json){
+        localStorage.irper_codes_json = JSON.stringify({}); //only at first visit 
+    }
+
+    window.irper_codes = JSON.parse(localStorage.irper_codes_json);
+
+    //load stored IR codes
+    start_IR_GUI();
+
+    //start loop
+    startWebSocket();
+});
+
+
+    </script>
+  </body>
+</html>

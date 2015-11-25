@@ -1,0 +1,6 @@
+[submodule "arduinoWebSockets"]
+	path = libraries/arduinoWebSockets
+	url = https://github.com/Links2004/arduinoWebSockets.git
+[submodule "IRremoteESP8266"]
+	path = libraries/IRremoteESP8266
+	url = https://github.com/markszabo/IRremoteESP8266.git
