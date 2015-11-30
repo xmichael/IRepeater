@@ -4,11 +4,6 @@
  * 3. Web server -- custom
  * 4.OTA (/update)
 */
-#define DBG(...) Serial.println( __VA_ARGS__ )
-#ifndef DBG
-#define DBG(...)
-#endif
-
 #include <Arduino.h>
 #include <WebSocketsServer.h>
 #include <Hash.h>
@@ -20,14 +15,16 @@
 #include <ESP8266mDNS.h>
 #include <FS.h>
 
+#include <DNSServer.h>
+
 #include <ESP8266httpUpdate.h>
 
 
 #include <IRremoteESP8266.h>
 #include <IRremoteInt.h>
 
-//#include <eboard.h>
 #include <utils.h>
+//#include <eboard.h>
 
 
 const char* host = "irper";
@@ -44,6 +41,7 @@ static File fsUploadFile; //holds the current upload
 using Utils::connect;
 using Utils::webSocket;
 using Utils::webSocketEvent;
+using Utils::dnsServer;
 
 /* Add custom routes here! until we get wildcard support */
 
@@ -93,7 +91,6 @@ void myFsUpdater(ESP8266WebServer* server){
                 webSocket.broadcastTXT(msg.c_str(), msg.length());
                 return;
             }
-            // ?? filename = String();
         } else if(upload.status == UPLOAD_FILE_WRITE){
             //DBG_OUTPUT_PORT.print("handleFileUpload Data: "); DBG_OUTPUT_PORT.println(upload.currentSize);
             if(fsUploadFile)
@@ -193,6 +190,7 @@ You can serve your compiled files including the bin with e.g.
         code = server->arg(1).toInt();
         bits = server->arg(2).toInt();
                 
+        // TODO support repeat-values according to example z3t0/Arduino-IRremote/.../IRrecord.ino
         switch (type){
             case UNKNOWN:
                 DBG("Sending Raw... Pray");
@@ -206,6 +204,23 @@ You can serve your compiled files including the bin with e.g.
                 msg = "Sending NEC " + String(code, HEX) + "  " + String(bits);
                 DBG(msg);
                 irsend.sendNEC(code, bits);
+                break;
+            case SONY:
+                msg = "Sending SONY " + String(code, HEX) + "  " + String(bits);
+                DBG(msg);
+                irsend.sendSony(code, bits);
+                break;
+            case RC5:
+                msg = "Sending RC5 " + String(code, HEX) + "  " + String(bits);
+                code = code | (1 << (bits - 1));
+                DBG(msg);
+                irsend.sendRC5(code, bits);
+                break;
+            case RC6:
+                msg = "Sending RC6 " + String(code, HEX) + "  " + String(bits);
+                code = code | (1 << (bits - 1));
+                DBG(msg);
+                irsend.sendRC6(code, bits);
                 break;
             default:
                 ;
@@ -241,15 +256,23 @@ void dump(decode_results *results) {
         webSocket.broadcastTXT(msg.c_str(), msg.length());
         return;
     }
-
+    
     buf[0] = results->decode_type;
     buf[1] = results->value;
     buf[2] = results->bits;
     buf[3] = results->rawlen;
+    
+    //ignore repeats
+    if ( (buf[0] == 0xFFFFFFFF) || (buf[1] == 0xffffffff) ){
+        msg = String("Ignoring Repeated IR");
+        webSocket.broadcastTXT(msg.c_str(), msg.length());
+        return;
+    }
     memcpy((void*) &buf[4], (void*) results->rawbuf, sizeof(uint32) * results->rawlen);
     //dbg
     msg = "type: " + String(buf[0]) + " value: "  + String(buf[1], HEX);
-    DBG(msg + " (" + String(buf[2], DEC) + " bits) Raw (" + String(buf[3], DEC)+"): ");
+    msg += String(" Raw (") + String(buf[3], DEC)+"): ";
+    webSocket.broadcastTXT(msg.c_str(), msg.length());
     for (int i = 1; i < buf[3]; i++) {
         if (i & 1) {
         Serial.print(results->rawbuf[i]*USECPERTICK, DEC);
@@ -277,8 +300,8 @@ void setup(void){
     Serial.begin(115200);
     Serial.println();
     Serial.println("Booting Sketch...");
-    // brd.startRGB();
-    // brd.setRGB(0xFF,0,0);
+    //brd.startRGB();
+    //brd.setRGB(0xFF,0,0);
 
     Utils::connect("/cred");
     //brd.setRGB(0,0,0xFF);
@@ -308,4 +331,8 @@ void loop(void){
     irrecv.resume(); // Receive the next value
   }
   delay(1);
+  /// enable captive portal for AP
+  if(WiFi.getMode() == WIFI_AP){
+      dnsServer.processNextRequest();
+  }
 } 
