@@ -3,6 +3,26 @@
   <head>
   <meta charset="UTF-8">
   <style>
+  html, body { 
+    padding: 0px;
+    margin: 0px;
+    height: 100%;
+    width: 100%;
+}
+
+    #pins{
+        width:100%;
+        height: 20%;
+    }
+
+    #txtArea {
+        border: none;
+        padding: 0px;
+        width: 100%;
+        min-height: 50%;
+        height: 50%;
+    }
+
   .pin{
 /*  width: 100px;*/
 /*  height: 100px;*/
@@ -12,10 +32,7 @@
     border-radius: 50px;
     padding: 20px;
   }
-  #txtArea {
-    width: 80%;
-    min-height: 120px;
-  }
+
   </style>
   </head>
   <body>
@@ -32,7 +49,7 @@
       <div id="13" class="pin" onclick="gpiotoggle(this);">D13</div>
       <div id="15" class="pin" onclick="gpiotoggle(this);">D15</div>
     </div>
-    <div><textarea id="txtArea">Messages:</textArea></div>
+    <textarea id="txtArea">Messages:</textArea>
     <button id="btnClear" type="button" onclick="delete(window.localStorage.irper_codes_json);" >Clear IR codes!</button>
     <div id="IR"></div>
 
@@ -141,13 +158,13 @@ function startWebSocket()
         };
                    
         /* If message is TXT then if it's a debug message.
-            If it is binary then it is an uint32 [type,code, length, raw_data_with_legth_size ]
+            If it is binary then it is an uint32: [type,code, length, raw_data * legth_size ]
         */
         ws.onmessage = function (e) 
         { 
             var received_msg = e.data;
             if ( typeof e.data === "string" ) {
-                dbg(e.data);
+                dbg("MCU ", e.data);
                 return;
             }
             //assume all messages are binary (how to check?)
